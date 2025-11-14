@@ -1,4 +1,5 @@
 mod error;
+mod expression;
 mod scanner;
 
 use anyhow::{Error, anyhow};
@@ -9,11 +10,16 @@ use std::{
     path::PathBuf,
 };
 
+use crate::scanner::Scanner;
+
 fn main() -> Result<(), Error> {
     let args: Vec<String> = env::args().collect();
     match args.len() {
         1 => run_prompt(),
-        2 => run_file(PathBuf::from(args[1].to_owned())),
+        2 => {
+            // run_file(PathBuf::from(args[1].to_owned()))
+            todo!("Figure out how to implement multi-line quotes and block comments");
+        }
         _ => Err(anyhow!("Usage: lox [script]")),
     }
 }
@@ -26,7 +32,8 @@ fn run_prompt() -> Result<(), Error> {
 
         let mut line = String::new();
         io::stdin().read_line(&mut line).unwrap();
-        if line == "\n" {
+        let line = line.trim_end().to_string();
+        if line.is_empty() {
             break;
         }
 
@@ -52,5 +59,12 @@ fn run_file(path: PathBuf) -> Result<(), Error> {
 }
 
 fn run(line: String) -> Result<(), Error> {
-    Ok(println!("Ran line: '{}'", line))
+    let mut s = Scanner::new(line.to_owned());
+    let tokens = s.scan_tokens();
+
+    for token in tokens.iter() {
+        println!("TOKEN -> {token}");
+    }
+
+    Ok(())
 }
