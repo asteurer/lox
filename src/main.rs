@@ -5,7 +5,7 @@ use clap::{ArgGroup, Parser};
 use lox::Lox;
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Write, stdin, stdout},
+    io::{BufRead, BufReader, Read, Write, stdin, stdout},
     path::PathBuf,
     process::exit,
 };
@@ -35,7 +35,7 @@ fn main() -> Result<()> {
 
     match input {
         Input::File(p) => {
-            if (p.extension().is_some() && !p.extension().unwrap().eq(".lox"))
+            if (p.extension().is_some() && !p.extension().unwrap().eq("lox"))
                 || p.extension().is_none()
             {
                 return Err(anyhow!(
@@ -43,18 +43,18 @@ fn main() -> Result<()> {
                 ));
             }
 
-            let f = File::open(&p).with_context(|| {
+            let mut f = File::open(&p).with_context(|| {
                 format!(
                     "failed to open {}",
                     p.to_str().expect("supplied path is not valid utf-8")
                 )
             })?;
-            for (i, line) in BufReader::new(f).lines().enumerate() {
-                let line = line?;
-                if let Err(msg) = Lox::run(line) {
-                    Lox::error(Some(i + 1), msg.to_string());
-                    exit(65);
-                }
+            let mut source = String::new();
+            f.read_to_string(&mut source)?;
+            if let Err(msg) = Lox::run(source) {
+                // TODO: Figure out how to surface the line number
+                Lox::error(None, msg.to_string());
+                exit(65);
             }
         }
         Input::Interactive => {
