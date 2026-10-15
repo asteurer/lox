@@ -5,9 +5,8 @@ use clap::{ArgGroup, Parser};
 use lox::Lox;
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Read, Write, stdin, stdout},
+    io::{Read, Write, stdin, stdout},
     path::PathBuf,
-    process::exit,
 };
 
 #[derive(Parser)]
@@ -51,11 +50,7 @@ fn main() -> Result<()> {
             })?;
             let mut source = String::new();
             f.read_to_string(&mut source)?;
-            if let Err(msg) = Lox::run(source) {
-                // TODO: Figure out how to surface the line number
-                Lox::error(None, msg.to_string());
-                exit(65);
-            }
+            Lox::run(source)?;
         }
         Input::Interactive => {
             let mut buf = String::new();
@@ -70,8 +65,8 @@ fn main() -> Result<()> {
                 if line == "quit" || line == "q" {
                     break;
                 }
-                if let Err(msg) = Lox::run(line.to_string()) {
-                    Lox::error(None, msg.to_string());
+                if let Err(e) = Lox::run(line.to_string()) {
+                    eprintln!("{e}");
                 }
             }
         }

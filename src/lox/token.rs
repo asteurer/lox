@@ -1,4 +1,4 @@
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum TokenType {
     // 1 char
     LeftParen,
@@ -150,6 +150,7 @@ impl TokenType {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Token {
     pub ty: TokenType,
     pub line: usize,
