@@ -1,12 +1,12 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, bail};
 
 use crate::lox::{
     Lox,
-    ast::Expr,
+    ast::{Expr, Stmt},
     token::{Token, TokenType},
 };
 
-pub(crate) struct Parser<'a> {
+pub struct Parser<'a> {
     tokens: &'a [Token],
     current: usize,
 }
@@ -16,8 +16,68 @@ impl<'a> Parser<'a> {
         Parser { tokens, current: 0 }
     }
 
-    pub fn parse(&mut self) -> Result<Expr> {
-        self.expression()
+    pub fn parse(&mut self) -> Result<Vec<Stmt>> {
+        let mut stmts = vec![];
+        while !self.is_eof() {
+            stmts.push(self.statement()?);
+        }
+        Ok(stmts)
+    }
+
+    fn statement(&mut self) -> Result<Stmt> {
+        if self.match_(|t| matches!(t, TokenType::Print)) {
+            self.print_statement()
+        } else if self.match_(|t| matches!(t, TokenType::Var)) {
+            self.variable_declaration()
+        } else {
+            self.expression_statement()
+        }
+    }
+
+    fn print_statement(&mut self) -> Result<Stmt> {
+        let val = self.expression()?;
+        self.consume(&TokenType::Semicolon, "Expect ';' after value.")?;
+        Ok(Stmt::Print(val))
+    }
+
+    fn expression_statement(&mut self) -> Result<Stmt> {
+        let expr = self.expression()?;
+        self.consume(&TokenType::Semicolon, "Expect ';' after expression.")?;
+        Ok(Stmt::Expr(expr))
+    }
+
+    fn variable_declaration(&mut self) -> Result<Stmt> {
+        let identifier = match self.advance() {
+            Some(Token { ty, line: _ }) => {
+                debug_assert!(matches!(ty, TokenType::Ident(_)));
+                ty
+            }
+            _ => bail!("Expect identifier in variable declaration"),
+        };
+
+        let initializer = match self.advance() {
+            Some(Token {
+                ty: TokenType::Equal,
+                line: _,
+            }) => {
+                let expr = Some(self.expression()?);
+                self.consume(
+                    &TokenType::Semicolon,
+                    "Expect ';' after variable declaration",
+                )?;
+                expr
+            }
+            Some(Token {
+                ty: TokenType::Semicolon,
+                line: _,
+            }) => None,
+            _ => bail!("Invalid variable declaration"),
+        };
+
+        Ok(Stmt::Var {
+            identifier,
+            initializer,
+        })
     }
 
     fn expression(&mut self) -> Result<Expr> {
@@ -104,7 +164,7 @@ impl<'a> Parser<'a> {
             return Ok(Expr::grouping(expr));
         }
 
-        Err(anyhow!(Lox::error(self.peek(), "Expect expression.")))
+        bail!(Lox::error(self.peek(), "Expect expression."))
     }
 
     // --- Helper Methods
@@ -123,7 +183,7 @@ impl<'a> Parser<'a> {
             return Ok(self.advance());
         }
 
-        Err(anyhow!(Lox::error(self.peek(), err_msg)))
+        bail!(Lox::error(self.peek(), err_msg))
     }
 
     fn check(&self, ty: &TokenType) -> bool {
@@ -151,6 +211,8 @@ impl<'a> Parser<'a> {
         matches!(self.peek().ty, TokenType::EOF)
     }
 
+    // TODO: Need to figure out how to incorporate this (see bottom of page 118 in `Crafting Interpreters`)
+    #[allow(dead_code)]
     fn synchronize(&mut self) {
         self.advance();
         while !self.is_eof() {

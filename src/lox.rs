@@ -1,4 +1,5 @@
 mod ast;
+mod environment;
 mod interpreter;
 mod parser;
 mod scanner;
@@ -7,19 +8,17 @@ mod token;
 use anyhow::Result;
 use scanner::Scanner;
 
-use crate::lox::{ast::Expr, parser::Parser, scanner::ScannerError};
+use crate::lox::{interpreter::Interpreter, parser::Parser, scanner::ScannerError};
 use token::{Token, TokenType};
 
 pub struct Lox;
 impl Lox {
     pub fn run(line: String) -> Result<()> {
         let tokens = Scanner::scan(&line).collect::<Result<Vec<Token>, ScannerError>>()?;
-        println!("{tokens:?}");
         let mut parser = Parser::new(&tokens);
-        let expr = parser.parse()?;
-        println!("{}", Expr::parenthesize(&expr));
-        let val = interpreter::evaluate(&expr)?;
-        println!("{val}");
+        let stmts = parser.parse()?;
+        let mut interpreter = Interpreter::new();
+        interpreter.interpret(&stmts)?;
         Ok(())
     }
 
@@ -35,7 +34,7 @@ impl Lox {
         }
     }
 
-    pub(crate) fn report(line: Option<usize>, where_: Option<String>, msg: &str) -> String {
+    pub fn report(line: Option<usize>, where_: Option<String>, msg: &str) -> String {
         let mut err = String::new();
         if let Some(line) = line {
             err.push_str(&format!("[line {line}] "));

@@ -1,6 +1,6 @@
 use crate::lox::token::TokenType;
 
-pub(crate) enum Expr {
+pub enum Expr {
     Literal(TokenType),
     Grouping(Box<Expr>),
     Unary {
@@ -50,6 +50,8 @@ impl Expr {
     }
 
     /// `1 + 2` becomes (+ 1 2)
+    /// TODO: This is here for debugging
+    #[allow(dead_code)]
     pub fn parenthesize(expr: &Expr) -> String {
         let expr_string = match expr {
             Expr::Literal(v) => return v.lexeme(),
@@ -75,4 +77,13 @@ impl Expr {
 
         format!("({expr_string})")
     }
+}
+
+pub enum Stmt {
+    Expr(Expr),
+    Print(Expr),
+    Var {
+        identifier: TokenType,
+        initializer: Option<Expr>,
+    },
 }

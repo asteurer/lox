@@ -1,4 +1,8 @@
-use crate::lox::{ast::Expr, token::TokenType};
+use crate::lox::{
+    ast::{Expr, Stmt},
+    environment::Environment,
+    token::TokenType,
+};
 use anyhow::{Result, bail};
 
 /// Evaluates numeric binary operations between two number types that evaluate to a number type or boolean type
@@ -46,6 +50,7 @@ macro_rules! binary_equality {
     }};
 }
 
+#[derive(Clone)]
 pub enum Value {
     Nil,
     Bool(bool),
@@ -64,7 +69,49 @@ impl std::fmt::Display for Value {
     }
 }
 
-pub fn evaluate(expr: &Expr) -> Result<Value> {
+pub struct Interpreter {
+    env: Environment,
+}
+
+impl Interpreter {
+    pub fn new() -> Self {
+        Interpreter {
+            env: Environment::new(),
+        }
+    }
+
+    pub fn interpret(&mut self, stmts: &[Stmt]) -> Result<()> {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Expr(expr) => {
+                    evaluate_expr(expr)?;
+                }
+                Stmt::Print(expr) => {
+                    let val = evaluate_expr(expr)?;
+                    println!("{val}");
+                }
+                Stmt::Var {
+                    identifier,
+                    initializer,
+                } => {
+                    let name = match identifier {
+                        TokenType::Ident(i) => i.to_owned(),
+                        _ => unreachable!(),
+                    };
+                    let value = if let Some(expr) = initializer {
+                        evaluate_expr(expr)?
+                    } else {
+                        Value::Nil
+                    };
+                    self.env.define(name, value);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn evaluate_expr(expr: &Expr) -> Result<Value> {
     let result = match expr {
         Expr::Literal(tt) => match tt {
             TokenType::Str(s) => Value::String(s.to_owned()),
@@ -72,14 +119,11 @@ pub fn evaluate(expr: &Expr) -> Result<Value> {
             TokenType::False => Value::Bool(false),
             TokenType::True => Value::Bool(true),
             TokenType::Nil => Value::Nil,
-            other => panic!(
-                "This is incorrectly being interpreted as a literal expression: '{}'",
-                other.lexeme()
-            ),
+            _ => unreachable!(),
         },
-        Expr::Grouping(expr) => evaluate(expr)?,
+        Expr::Grouping(expr) => evaluate_expr(expr)?,
         Expr::Unary { operator, expr } => {
-            let resolved = evaluate(expr)?;
+            let resolved = evaluate_expr(expr)?;
             match operator {
                 TokenType::Bang => {
                     let val = match resolved {
@@ -96,10 +140,7 @@ pub fn evaluate(expr: &Expr) -> Result<Value> {
                         bail!("The minus (`-`) unary operator can only be used on numbers");
                     }
                 }
-                other => panic!(
-                    "This is incorrectly being interpreted as a unary operator: '{}'",
-                    other.lexeme()
-                ),
+                _ => unreachable!(),
             }
         }
         Expr::Binary {
@@ -107,8 +148,8 @@ pub fn evaluate(expr: &Expr) -> Result<Value> {
             operator,
             right,
         } => {
-            let left_resolved = evaluate(&**left)?;
-            let right_resolved = evaluate(&**right)?;
+            let left_resolved = evaluate_expr(&**left)?;
+            let right_resolved = evaluate_expr(&**right)?;
 
             match operator {
                 TokenType::Minus => {
@@ -149,7 +190,7 @@ pub fn evaluate(expr: &Expr) -> Result<Value> {
                         "The plus (`+`) binary operator can only be used with numbers or strings"
                     ),
                 },
-                _ => todo!(),
+                _ => unreachable!(),
             }
         }
     };
