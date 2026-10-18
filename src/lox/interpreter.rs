@@ -69,131 +69,157 @@ impl std::fmt::Display for Value {
     }
 }
 
-pub struct Interpreter {
-    env: Environment,
+pub struct Interpreter<'a> {
+    env: &'a mut Environment<'a>,
 }
 
-impl Interpreter {
-    pub fn new() -> Self {
-        Interpreter {
-            env: Environment::new(),
-        }
+impl<'a> Interpreter<'a> {
+    pub fn new(env: &'a mut Environment<'a>) -> Self {
+        Interpreter { env }
     }
 
-    pub fn interpret(&mut self, stmts: &[Stmt]) -> Result<()> {
-        for stmt in stmts {
-            match stmt {
-                Stmt::Expr(expr) => {
-                    evaluate_expr(expr)?;
-                }
-                Stmt::Print(expr) => {
-                    let val = evaluate_expr(expr)?;
-                    println!("{val}");
-                }
-                Stmt::Var {
-                    identifier,
-                    initializer,
-                } => {
-                    let name = match identifier {
-                        TokenType::Ident(i) => i.to_owned(),
-                        _ => unreachable!(),
-                    };
-                    let value = if let Some(expr) = initializer {
-                        evaluate_expr(expr)?
-                    } else {
-                        Value::Nil
-                    };
-                    self.env.define(name, value);
+    pub fn interpret(
+        &'a mut self,
+        stmts: &[Stmt],
+        environment: Option<&'a mut Environment<'a>>,
+    ) -> Result<()> {
+        todo!("This immediately returns...");
+        let previous = &mut *self.env;
+        if let Some(current) = environment {
+            self.env = current;
+            for stmt in stmts {
+                self.execute(stmt)?;
+            }
+        } else {
+            self.env = previous;
+        }
+
+        Ok(())
+    }
+
+    fn execute(&mut self, stmt: &Stmt) -> Result<()> {
+        match stmt {
+            Stmt::Expr(expr) => {
+                self.evaluate_expr(expr)?;
+            }
+            Stmt::Print(expr) => {
+                let val = self.evaluate_expr(expr)?;
+                println!("{val}");
+            }
+            Stmt::Var {
+                identifier,
+                initializer,
+            } => {
+                let name = match identifier {
+                    TokenType::Ident(i) => i.to_owned(),
+                    _ => unreachable!(),
+                };
+                let value = if let Some(expr) = initializer {
+                    self.evaluate_expr(expr)?
+                } else {
+                    Value::Nil
+                };
+                self.env.define(name, value);
+            }
+            Stmt::Block(stmts) => {
+                for stmt in stmts {
+                    self.execute(stmt)?;
                 }
             }
         }
         Ok(())
     }
-}
 
-fn evaluate_expr(expr: &Expr) -> Result<Value> {
-    let result = match expr {
-        Expr::Literal(tt) => match tt {
-            TokenType::Str(s) => Value::String(s.to_owned()),
-            TokenType::Num(n) => Value::Number(*n),
-            TokenType::False => Value::Bool(false),
-            TokenType::True => Value::Bool(true),
-            TokenType::Nil => Value::Nil,
-            _ => unreachable!(),
-        },
-        Expr::Grouping(expr) => evaluate_expr(expr)?,
-        Expr::Unary { operator, expr } => {
-            let resolved = evaluate_expr(expr)?;
-            match operator {
-                TokenType::Bang => {
-                    let val = match resolved {
-                        Value::Nil => false,
-                        Value::Bool(b) => b,
-                        _ => true,
-                    };
-                    return Ok(Value::Bool(!val));
-                }
-                TokenType::Minus => {
-                    if let Value::Number(n) = resolved {
-                        Value::Number(-n)
-                    } else {
-                        bail!("The minus (`-`) unary operator can only be used on numbers");
-                    }
-                }
+    fn evaluate_expr(&mut self, expr: &Expr) -> Result<Value> {
+        let result = match expr {
+            Expr::Literal(tt) => match tt {
+                TokenType::Str(s) => Value::String(s.to_owned()),
+                TokenType::Num(n) => Value::Number(*n),
+                TokenType::False => Value::Bool(false),
+                TokenType::True => Value::Bool(true),
+                TokenType::Nil => Value::Nil,
                 _ => unreachable!(),
-            }
-        }
-        Expr::Binary {
-            left,
-            operator,
-            right,
-        } => {
-            let left_resolved = evaluate_expr(&**left)?;
-            let right_resolved = evaluate_expr(&**right)?;
-
-            match operator {
-                TokenType::Minus => {
-                    binary_number!(Number, -, left_resolved, right_resolved)
-                }
-                TokenType::Slash => {
-                    binary_number!(Number, /, left_resolved, right_resolved)
-                }
-                TokenType::Star => {
-                    binary_number!(Number, *, left_resolved, right_resolved)
-                }
-                TokenType::EqualEqual => {
-                    binary_equality!(==, left_resolved, right_resolved)
-                }
-                TokenType::BangEqual => {
-                    binary_equality!(!=, left_resolved, right_resolved)
-                }
-                TokenType::Greater => {
-                    binary_number!(Bool, >, left_resolved, right_resolved)
-                }
-                TokenType::GreaterEqual => {
-                    binary_number!(Bool, >=, left_resolved, right_resolved)
-                }
-                TokenType::Less => {
-                    binary_number!(Bool, <, left_resolved, right_resolved)
-                }
-                TokenType::LessEqual => {
-                    binary_number!(Bool, <=, left_resolved, right_resolved)
-                }
-                TokenType::Plus => match (left_resolved, right_resolved) {
-                    (Value::String(lhs), Value::String(rhs)) => {
-                        return Ok(Value::String(format!("{lhs}{rhs}")));
+            },
+            Expr::Variable(tt) => self.env.get(&tt.lexeme())?,
+            Expr::Grouping(expr) => self.evaluate_expr(expr)?,
+            Expr::Unary { operator, expr } => {
+                let resolved = self.evaluate_expr(expr)?;
+                match operator {
+                    TokenType::Bang => {
+                        let val = match resolved {
+                            Value::Nil => false,
+                            Value::Bool(b) => b,
+                            _ => true,
+                        };
+                        return Ok(Value::Bool(!val));
                     }
-                    (Value::Number(lhs), Value::Number(rhs)) => {
-                        return Ok(Value::Number(lhs + rhs));
+                    TokenType::Minus => {
+                        if let Value::Number(n) = resolved {
+                            Value::Number(-n)
+                        } else {
+                            bail!("The minus (`-`) unary operator can only be used on numbers");
+                        }
                     }
-                    _ => bail!(
-                        "The plus (`+`) binary operator can only be used with numbers or strings"
-                    ),
-                },
-                _ => unreachable!(),
+                    _ => unreachable!(),
+                }
             }
-        }
-    };
+            Expr::Assign { name, value } => {
+                let resolved = self.evaluate_expr(value)?;
+                self.env.assign(&name.lexeme(), resolved.clone())?;
+                resolved
+            }
+            Expr::Binary {
+                left,
+                operator,
+                right,
+            } => {
+                let left_resolved = self.evaluate_expr(&**left)?;
+                let right_resolved = self.evaluate_expr(&**right)?;
 
-    Ok(result)
+                match operator {
+                    TokenType::Minus => {
+                        binary_number!(Number, -, left_resolved, right_resolved)
+                    }
+                    TokenType::Slash => {
+                        binary_number!(Number, /, left_resolved, right_resolved)
+                    }
+                    TokenType::Star => {
+                        binary_number!(Number, *, left_resolved, right_resolved)
+                    }
+                    TokenType::EqualEqual => {
+                        binary_equality!(==, left_resolved, right_resolved)
+                    }
+                    TokenType::BangEqual => {
+                        binary_equality!(!=, left_resolved, right_resolved)
+                    }
+                    TokenType::Greater => {
+                        binary_number!(Bool, >, left_resolved, right_resolved)
+                    }
+                    TokenType::GreaterEqual => {
+                        binary_number!(Bool, >=, left_resolved, right_resolved)
+                    }
+                    TokenType::Less => {
+                        binary_number!(Bool, <, left_resolved, right_resolved)
+                    }
+                    TokenType::LessEqual => {
+                        binary_number!(Bool, <=, left_resolved, right_resolved)
+                    }
+                    TokenType::Plus => match (left_resolved, right_resolved) {
+                        (Value::String(lhs), Value::String(rhs)) => {
+                            return Ok(Value::String(format!("{lhs}{rhs}")));
+                        }
+                        (Value::Number(lhs), Value::Number(rhs)) => {
+                            return Ok(Value::Number(lhs + rhs));
+                        }
+                        _ => bail!(
+                            "The plus (`+`) binary operator can only be used with numbers or strings"
+                        ),
+                    },
+                    _ => unreachable!(),
+                }
+            }
+        };
+
+        Ok(result)
+    }
 }

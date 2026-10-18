@@ -29,6 +29,8 @@ impl<'a> Parser<'a> {
             self.print_statement()
         } else if self.match_(|t| matches!(t, TokenType::Var)) {
             self.variable_declaration()
+        } else if self.match_(|t| matches!(t, TokenType::LeftBrace)) {
+            self.block_statement()
         } else {
             self.expression_statement()
         }
@@ -44,6 +46,18 @@ impl<'a> Parser<'a> {
         let expr = self.expression()?;
         self.consume(&TokenType::Semicolon, "Expect ';' after expression.")?;
         Ok(Stmt::Expr(expr))
+    }
+
+    fn block_statement(&mut self) -> Result<Stmt> {
+        let mut statements = vec![];
+
+        while !self.check(&TokenType::RightBrace) {
+            statements.push(self.statement()?);
+        }
+
+        self.consume(&TokenType::RightBrace, "Expect '}' after block.")?;
+
+        Ok(Stmt::Block(statements))
     }
 
     fn variable_declaration(&mut self) -> Result<Stmt> {
@@ -81,7 +95,25 @@ impl<'a> Parser<'a> {
     }
 
     fn expression(&mut self) -> Result<Expr> {
-        self.equality()
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> Result<Expr> {
+        let mut expr = self.equality()?;
+
+        if self.match_(|t| matches!(t, TokenType::Equal)) {
+            let equals = self.previous();
+            let value = self.assignment()?;
+
+            match &expr {
+                Expr::Variable(tt @ TokenType::Ident(_)) => {
+                    expr = Expr::assign(tt.to_owned(), value)
+                }
+                _ => bail!(Lox::error(equals, "Invalid assignment target.")),
+            }
+        }
+
+        return Ok(expr);
     }
 
     fn equality(&mut self) -> Result<Expr> {
@@ -156,6 +188,10 @@ impl<'a> Parser<'a> {
             )
         }) {
             return Ok(Expr::Literal(self.previous().ty));
+        }
+
+        if self.match_(|t| matches!(t, TokenType::Ident(_))) {
+            return Ok(Expr::Variable(self.previous().ty));
         }
 
         if self.match_(|t| matches!(t, TokenType::LeftParen)) {

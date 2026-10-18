@@ -8,7 +8,9 @@ mod token;
 use anyhow::Result;
 use scanner::Scanner;
 
-use crate::lox::{interpreter::Interpreter, parser::Parser, scanner::ScannerError};
+use crate::lox::{
+    environment::Environment, interpreter::Interpreter, parser::Parser, scanner::ScannerError,
+};
 use token::{Token, TokenType};
 
 pub struct Lox;
@@ -17,8 +19,9 @@ impl Lox {
         let tokens = Scanner::scan(&line).collect::<Result<Vec<Token>, ScannerError>>()?;
         let mut parser = Parser::new(&tokens);
         let stmts = parser.parse()?;
-        let mut interpreter = Interpreter::new();
-        interpreter.interpret(&stmts)?;
+        let mut env = Environment::new(None);
+        let mut interpreter = Interpreter::new(&mut env);
+        interpreter.interpret(&stmts, None)?;
         Ok(())
     }
 
