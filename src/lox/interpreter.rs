@@ -4,6 +4,7 @@ use crate::lox::{
     token::TokenType,
 };
 use anyhow::{Result, bail};
+use bumpalo::Bump;
 
 /// Evaluates numeric binary operations between two number types that evaluate to a number type or boolean type
 macro_rules! binary_number {
@@ -70,40 +71,26 @@ impl std::fmt::Display for Value {
 }
 
 pub struct Interpreter<'a> {
-    env: &'a mut Environment<'a>,
+    arena: &'a Bump,
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(env: &'a mut Environment<'a>) -> Self {
-        Interpreter { env }
+    pub fn new(arena: &'a Bump) -> Self {
+        Interpreter { arena }
     }
 
-    pub fn interpret(
-        &'a mut self,
-        stmts: &[Stmt],
-        environment: Option<&'a mut Environment<'a>>,
-    ) -> Result<()> {
-        todo!("This immediately returns...");
-        let previous = &mut *self.env;
-        if let Some(current) = environment {
-            self.env = current;
-            for stmt in stmts {
-                self.execute(stmt)?;
-            }
-        } else {
-            self.env = previous;
-        }
-
-        Ok(())
+    pub fn interpret(&mut self, ast: &[Stmt]) -> Result<()> {
+        let env = Environment::new_in(self.arena, None);
+        ast.iter().try_for_each(|s| self.execute_statement(s, env))
     }
 
-    fn execute(&mut self, stmt: &Stmt) -> Result<()> {
+    fn execute_statement(&self, stmt: &Stmt, env: &'a Environment<'a>) -> Result<()> {
         match stmt {
             Stmt::Expr(expr) => {
-                self.evaluate_expr(expr)?;
+                self.evaluate_expr(expr, env)?;
             }
             Stmt::Print(expr) => {
-                let val = self.evaluate_expr(expr)?;
+                let val = self.evaluate_expr(expr, env)?;
                 println!("{val}");
             }
             Stmt::Var {
@@ -115,22 +102,23 @@ impl<'a> Interpreter<'a> {
                     _ => unreachable!(),
                 };
                 let value = if let Some(expr) = initializer {
-                    self.evaluate_expr(expr)?
+                    self.evaluate_expr(expr, env)?
                 } else {
                     Value::Nil
                 };
-                self.env.define(name, value);
+                env.define(name, value);
             }
             Stmt::Block(stmts) => {
+                let env = Environment::new_in(self.arena, Some(env));
                 for stmt in stmts {
-                    self.execute(stmt)?;
+                    self.execute_statement(stmt, env)?;
                 }
             }
         }
         Ok(())
     }
 
-    fn evaluate_expr(&mut self, expr: &Expr) -> Result<Value> {
+    fn evaluate_expr(&self, expr: &Expr, env: &'a Environment<'a>) -> Result<Value> {
         let result = match expr {
             Expr::Literal(tt) => match tt {
                 TokenType::Str(s) => Value::String(s.to_owned()),
@@ -140,10 +128,10 @@ impl<'a> Interpreter<'a> {
                 TokenType::Nil => Value::Nil,
                 _ => unreachable!(),
             },
-            Expr::Variable(tt) => self.env.get(&tt.lexeme())?,
-            Expr::Grouping(expr) => self.evaluate_expr(expr)?,
+            Expr::Variable(tt) => env.get(&tt.lexeme())?,
+            Expr::Grouping(expr) => self.evaluate_expr(expr, env)?,
             Expr::Unary { operator, expr } => {
-                let resolved = self.evaluate_expr(expr)?;
+                let resolved = self.evaluate_expr(expr, env)?;
                 match operator {
                     TokenType::Bang => {
                         let val = match resolved {
@@ -164,8 +152,8 @@ impl<'a> Interpreter<'a> {
                 }
             }
             Expr::Assign { name, value } => {
-                let resolved = self.evaluate_expr(value)?;
-                self.env.assign(&name.lexeme(), resolved.clone())?;
+                let resolved = self.evaluate_expr(value, env)?;
+                env.assign(&name.lexeme(), resolved.clone())?;
                 resolved
             }
             Expr::Binary {
@@ -173,8 +161,8 @@ impl<'a> Interpreter<'a> {
                 operator,
                 right,
             } => {
-                let left_resolved = self.evaluate_expr(&**left)?;
-                let right_resolved = self.evaluate_expr(&**right)?;
+                let left_resolved = self.evaluate_expr(&**left, env)?;
+                let right_resolved = self.evaluate_expr(&**right, env)?;
 
                 match operator {
                     TokenType::Minus => {

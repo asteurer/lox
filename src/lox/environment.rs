@@ -1,30 +1,31 @@
 use crate::lox::interpreter::Value;
 use anyhow::{Result, bail};
+use bumpalo::Bump;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 pub struct Environment<'a> {
-    values: HashMap<String, Value>,
-    /// Pointer to parent enclosure
-    enclosing: Option<Box<&'a mut Environment<'a>>>,
+    values: RefCell<HashMap<String, Value>>,
+    enclosing: Option<&'a Environment<'a>>,
 }
 
 impl<'a> Environment<'a> {
-    pub fn new(enclosing: Option<&'a mut Environment<'a>>) -> Self {
-        Environment {
-            values: HashMap::new(),
-            enclosing: enclosing.map(|e| Box::new(e)),
-        }
+    pub fn new_in(arena: &'a Bump, enclosing: Option<&'a Environment<'a>>) -> &'a Environment<'a> {
+        arena.alloc(Environment {
+            values: RefCell::new(HashMap::new()),
+            enclosing,
+        })
     }
 
-    pub fn define(&mut self, name: String, value: Value) {
-        self.values.insert(name, value);
+    pub fn define(&self, name: String, value: Value) {
+        self.values.borrow_mut().insert(name, value);
     }
 
     pub fn get(&self, name: &str) -> Result<Value> {
-        if let Some(v) = self.values.get(name).cloned() {
+        if let Some(v) = self.values.borrow().get(name).cloned() {
             // If the value is contained in the immediate scope...
             Ok(v)
-        } else if let Some(env) = self.enclosing.as_ref() {
+        } else if let Some(env) = self.enclosing.as_deref() {
             // If the value is contained in a parent/ancestor's scope...
             env.get(name)
         } else {
@@ -32,10 +33,10 @@ impl<'a> Environment<'a> {
         }
     }
 
-    pub fn assign(&mut self, name: &str, value: Value) -> Result<()> {
-        match (self.values.get_mut(name), self.enclosing.as_mut()) {
+    pub fn assign(&self, name: &str, value: Value) -> Result<()> {
+        match (self.values.borrow_mut().get_mut(name), self.enclosing) {
             (Some(v), _) => *v = value,
-            (None, Some(env)) => env.assign(name, value)?,
+            (None, Some(enclosing)) => enclosing.assign(name, value)?,
             _ => bail!("Undefined variable '{name}'"),
         }
         Ok(())
@@ -45,9 +46,16 @@ impl<'a> Environment<'a> {
     #[allow(dead_code)]
     pub fn dump(&self) -> String {
         self.values
+            .borrow()
             .iter()
             .map(|(k, v)| format!("{k}: {v}"))
             .collect::<Vec<String>>()
             .join(", ")
+    }
+}
+
+impl<'a> Drop for Environment<'a> {
+    fn drop(&mut self) {
+        self.values.take();
     }
 }
