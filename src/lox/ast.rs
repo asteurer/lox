@@ -17,6 +17,11 @@ pub enum Expr {
         value: Box<Expr>,
     },
     Variable(TokenType),
+    Logical {
+        left: Box<Expr>,
+        operator: TokenType,
+        right: Box<Expr>,
+    },
 }
 
 impl Expr {
@@ -61,37 +66,58 @@ impl Expr {
         }
     }
 
-    /// `1 + 2` becomes (+ 1 2)
-    /// TODO: This is here for debugging
-    pub fn parenthesize(expr: &Expr) -> String {
-        let expr_string = match expr {
-            Expr::Literal(v) => return v.lexeme(),
-            Expr::Binary {
-                left,
-                operator,
-                right,
-            } => {
-                format!(
-                    "{} {} {}",
-                    operator.lexeme(),
-                    Expr::parenthesize(&**left),
-                    Expr::parenthesize(&**right)
-                )
-            }
-            Expr::Grouping(v) => {
-                format!("group {}", Expr::parenthesize(&**v),)
-            }
-            Expr::Unary { operator, expr } => {
-                format!("{} {}", operator.lexeme(), Expr::parenthesize(&**expr))
-            }
-            Expr::Assign { name, value } => {
-                format!("assign {} {}", name.lexeme(), Expr::parenthesize(&**value))
-            }
-            Expr::Variable(name) => format!("var {}", name.lexeme()),
-        };
-
-        format!("({expr_string})")
+    pub fn logical(left: Expr, operator: TokenType, right: Expr) -> Expr {
+        debug_assert!(matches!(operator, TokenType::And | TokenType::Or));
+        Expr::Logical {
+            left: Box::new(left),
+            operator,
+            right: Box::new(right),
+        }
     }
+
+    // /// `1 + 2` becomes (+ 1 2)
+    // /// TODO: This is here for debugging
+    // pub fn parenthesize(expr: &Expr) -> String {
+    //     let expr_string = match expr {
+    //         Expr::Literal(v) => return v.lexeme(),
+    //         Expr::Binary {
+    //             left,
+    //             operator,
+    //             right,
+    //         } => {
+    //             format!(
+    //                 "{} {} {}",
+    //                 operator.lexeme(),
+    //                 Expr::parenthesize(&**left),
+    //                 Expr::parenthesize(&**right)
+    //             )
+    //         }
+    //         Expr::Grouping(v) => {
+    //             format!("group {}", Expr::parenthesize(&**v),)
+    //         }
+    //         Expr::Unary { operator, expr } => {
+    //             format!("{} {}", operator.lexeme(), Expr::parenthesize(&**expr))
+    //         }
+    //         Expr::Assign { name, value } => {
+    //             format!("assign {} {}", name.lexeme(), Expr::parenthesize(&**value))
+    //         }
+    //         Expr::Variable(name) => format!("var {}", name.lexeme()),
+    //         Expr::Logical {
+    //             left,
+    //             operator,
+    //             right,
+    //         } => {
+    //             format!(
+    //                 "{} {} {}",
+    //                 operator.lexeme(),
+    //                 Expr::parenthesize(&**left),
+    //                 Expr::parenthesize(&**right)
+    //             )
+    //         }
+    //     };
+
+    //     format!("({expr_string})")
+    // }
 }
 
 pub enum Stmt {
@@ -102,28 +128,42 @@ pub enum Stmt {
         initializer: Option<Expr>,
     },
     Block(Vec<Stmt>),
+    If {
+        condition: Expr,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
+    },
+    While {
+        condition: Expr,
+        body: Box<Stmt>,
+    },
 }
 
-impl Stmt {
-    pub fn parenthesize(stmt: &Stmt) -> String {
-        let stmt_string = match stmt {
-            Stmt::Expr(e) => Expr::parenthesize(e),
-            Stmt::Print(e) => format!("print {}", Expr::parenthesize(e)),
-            Stmt::Var {
-                identifier,
-                initializer,
-            } => {
-                let val = initializer
-                    .as_ref()
-                    .and_then(|expr| Some(Expr::parenthesize(expr)))
-                    .unwrap_or(String::from("nil"));
-                format!("var {} {val}", identifier.lexeme())
-            }
-            Stmt::Block(stmts) => {
-                todo!()
-            }
-        };
+// impl Stmt {
+// pub fn parenthesize(stmt: &Stmt) -> String {
+//     let stmt_string = match stmt {
+//         Stmt::Expr(e) => Expr::parenthesize(e),
+//         Stmt::Print(e) => format!("print {}", Expr::parenthesize(e)),
+//         Stmt::Var {
+//             identifier,
+//             initializer,
+//         } => {
+//             let val = initializer
+//                 .as_ref()
+//                 .and_then(|expr| Some(Expr::parenthesize(expr)))
+//                 .unwrap_or(String::from("nil"));
+//             format!("var {} {val}", identifier.lexeme())
+//         }
+//         Stmt::Block(stmts) => {
+//             todo!()
+//         }
+//         Stmt::If {
+//             condition,
+//             then_branch,
+//             else_branch,
+//         } => todo!(),
+//     };
 
-        format!("({stmt_string})")
-    }
-}
+//     format!("({stmt_string})")
+// }
+// }

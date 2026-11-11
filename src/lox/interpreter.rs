@@ -114,6 +114,28 @@ impl<'a> Interpreter<'a> {
                     self.execute_statement(stmt, env)?;
                 }
             }
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let env = Environment::new_in(self.arena, Some(env));
+                let condition = self.evaluate_expr(&condition, env)?;
+                let condition_inner = Interpreter::extract_bool(&condition)?;
+
+                if condition_inner {
+                    self.execute_statement(then_branch, env)?;
+                }
+
+                if !condition_inner && let Some(stmt) = else_branch {
+                    self.execute_statement(stmt, env)?;
+                }
+            }
+            Stmt::While { condition, body } => {
+                while Interpreter::extract_bool(&self.evaluate_expr(condition, env)?)? {
+                    self.execute_statement(body, env)?;
+                }
+            }
         }
         Ok(())
     }
@@ -206,8 +228,37 @@ impl<'a> Interpreter<'a> {
                     _ => unreachable!(),
                 }
             }
+            Expr::Logical {
+                left,
+                operator,
+                right,
+            } => {
+                let left = self.evaluate_expr(left, env)?;
+                let left_inner = Interpreter::extract_bool(&left)?;
+
+                if matches!(operator, TokenType::Or) {
+                    // Short circuit 'or'
+                    if left_inner {
+                        return Ok(left);
+                    }
+                } else {
+                    // Short circuit 'and'
+                    if !left_inner {
+                        return Ok(left);
+                    }
+                }
+
+                self.evaluate_expr(right, env)?
+            }
         };
 
         Ok(result)
+    }
+
+    fn extract_bool(v: &Value) -> Result<bool> {
+        match v {
+            Value::Bool(b) => Ok(*b),
+            _ => bail!("expected a bool type, got {v}"),
+        }
     }
 }
