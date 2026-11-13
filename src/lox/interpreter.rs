@@ -1,6 +1,7 @@
 use crate::lox::{
     ast::{Expr, Stmt},
     environment::Environment,
+    function::{LoxCallable, LoxFunction, native},
     token::TokenType,
 };
 use anyhow::{Result, bail};
@@ -47,16 +48,30 @@ macro_rules! binary_equality {
             | (Value::Bool(_), Value::String(_) | Value::Number(_)) => {
                 return Ok(Value::Bool(true $op false));
             }
+            (Value::Function(_), _) | (_, Value::Function(_)) => {
+                anyhow::bail!("Functions aren't currently comparable.")
+            }
         }
     }};
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Nil,
     Bool(bool),
     Number(f64),
     String(String),
+    Function(Callable),
+}
+
+#[derive(Clone, Debug)]
+pub enum Callable {
+    Lox(LoxFunction),
+    Native {
+        name: &'static str,
+        arity: u8,
+        fun: fn(&[Value]) -> Result<Value>,
+    },
 }
 
 impl std::fmt::Display for Value {
@@ -66,31 +81,34 @@ impl std::fmt::Display for Value {
             Value::Number(n) => write!(f, "{n}"),
             Value::String(s) => write!(f, "{s}"),
             Value::Nil => write!(f, "nil"),
+            Value::Function(callable) => match callable {
+                Callable::Lox(fun) => write!(f, "{fun}",),
+                Callable::Native { name, .. } => write!(f, "<native fun {name}>"),
+            },
         }
     }
 }
 
-pub struct Interpreter<'a> {
-    arena: &'a Bump,
-}
+pub struct Interpreter;
 
-impl<'a> Interpreter<'a> {
-    pub fn new(arena: &'a Bump) -> Self {
-        Interpreter { arena }
+impl Interpreter {
+    pub fn interpret(arena: &Bump, enclosing: Option<&Environment>, ast: &[Stmt]) -> Result<()> {
+        let env = Environment::new_in(arena, enclosing);
+        Interpreter::add_native_functions(env)?;
+
+        ast.iter().try_for_each(|s| {
+            // println!("{}", Stmt::parenthesize(s));
+            Interpreter::execute_statement(arena, env, s)
+        })
     }
 
-    pub fn interpret(&mut self, ast: &[Stmt]) -> Result<()> {
-        let env = Environment::new_in(self.arena, None);
-        ast.iter().try_for_each(|s| self.execute_statement(s, env))
-    }
-
-    fn execute_statement(&self, stmt: &Stmt, env: &'a Environment<'a>) -> Result<()> {
+    fn execute_statement(arena: &Bump, env: &Environment, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Expr(expr) => {
-                self.evaluate_expr(expr, env)?;
+                Interpreter::evaluate_expr(arena, env, expr)?;
             }
             Stmt::Print(expr) => {
-                let val = self.evaluate_expr(expr, env)?;
+                let val = Interpreter::evaluate_expr(arena, env, expr)?;
                 println!("{val}");
             }
             Stmt::Var {
@@ -102,16 +120,16 @@ impl<'a> Interpreter<'a> {
                     _ => unreachable!(),
                 };
                 let value = if let Some(expr) = initializer {
-                    self.evaluate_expr(expr, env)?
+                    Interpreter::evaluate_expr(arena, env, expr)?
                 } else {
                     Value::Nil
                 };
                 env.define(name, value);
             }
             Stmt::Block(stmts) => {
-                let env = Environment::new_in(self.arena, Some(env));
+                let env = Environment::new_in(arena, Some(env));
                 for stmt in stmts {
-                    self.execute_statement(stmt, env)?;
+                    Interpreter::execute_statement(arena, env, stmt)?;
                 }
             }
             Stmt::If {
@@ -119,28 +137,36 @@ impl<'a> Interpreter<'a> {
                 then_branch,
                 else_branch,
             } => {
-                let env = Environment::new_in(self.arena, Some(env));
-                let condition = self.evaluate_expr(&condition, env)?;
+                let env = Environment::new_in(arena, Some(env));
+                let condition = Interpreter::evaluate_expr(arena, env, &condition)?;
                 let condition_inner = Interpreter::extract_bool(&condition)?;
 
                 if condition_inner {
-                    self.execute_statement(then_branch, env)?;
+                    Interpreter::execute_statement(arena, env, then_branch)?;
                 }
 
                 if !condition_inner && let Some(stmt) = else_branch {
-                    self.execute_statement(stmt, env)?;
+                    Interpreter::execute_statement(arena, env, stmt)?;
                 }
             }
             Stmt::While { condition, body } => {
-                while Interpreter::extract_bool(&self.evaluate_expr(condition, env)?)? {
-                    self.execute_statement(body, env)?;
+                while Interpreter::extract_bool(&Interpreter::evaluate_expr(
+                    arena, env, condition,
+                )?)? {
+                    Interpreter::execute_statement(arena, env, body)?;
                 }
+            }
+            Stmt::FunctionDef { name, .. } => {
+                env.define(
+                    name.lexeme(),
+                    Value::Function(Callable::Lox(LoxFunction::new(stmt))),
+                );
             }
         }
         Ok(())
     }
 
-    fn evaluate_expr(&self, expr: &Expr, env: &'a Environment<'a>) -> Result<Value> {
+    fn evaluate_expr(arena: &Bump, env: &Environment, expr: &Expr) -> Result<Value> {
         let result = match expr {
             Expr::Literal(tt) => match tt {
                 TokenType::Str(s) => Value::String(s.to_owned()),
@@ -151,9 +177,9 @@ impl<'a> Interpreter<'a> {
                 _ => unreachable!(),
             },
             Expr::Variable(tt) => env.get(&tt.lexeme())?,
-            Expr::Grouping(expr) => self.evaluate_expr(expr, env)?,
+            Expr::Grouping(expr) => Interpreter::evaluate_expr(arena, env, expr)?,
             Expr::Unary { operator, expr } => {
-                let resolved = self.evaluate_expr(expr, env)?;
+                let resolved = Interpreter::evaluate_expr(arena, env, expr)?;
                 match operator {
                     TokenType::Bang => {
                         let val = match resolved {
@@ -174,7 +200,7 @@ impl<'a> Interpreter<'a> {
                 }
             }
             Expr::Assign { name, value } => {
-                let resolved = self.evaluate_expr(value, env)?;
+                let resolved = Interpreter::evaluate_expr(arena, env, value)?;
                 env.assign(&name.lexeme(), resolved.clone())?;
                 resolved
             }
@@ -183,8 +209,8 @@ impl<'a> Interpreter<'a> {
                 operator,
                 right,
             } => {
-                let left_resolved = self.evaluate_expr(&**left, env)?;
-                let right_resolved = self.evaluate_expr(&**right, env)?;
+                let left_resolved = Interpreter::evaluate_expr(arena, env, &**left)?;
+                let right_resolved = Interpreter::evaluate_expr(arena, env, &**right)?;
 
                 match operator {
                     TokenType::Minus => {
@@ -233,7 +259,7 @@ impl<'a> Interpreter<'a> {
                 operator,
                 right,
             } => {
-                let left = self.evaluate_expr(left, env)?;
+                let left = Interpreter::evaluate_expr(arena, env, left)?;
                 let left_inner = Interpreter::extract_bool(&left)?;
 
                 if matches!(operator, TokenType::Or) {
@@ -248,7 +274,37 @@ impl<'a> Interpreter<'a> {
                     }
                 }
 
-                self.evaluate_expr(right, env)?
+                Interpreter::evaluate_expr(arena, env, right)?
+            }
+            Expr::FunctionCall { callee, args, .. } => {
+                let mut resolved_args = vec![];
+                for arg in args {
+                    resolved_args.push(Interpreter::evaluate_expr(arena, env, arg)?);
+                }
+
+                match Interpreter::evaluate_expr(arena, env, callee)? {
+                    Value::Function(callable) => match callable {
+                        Callable::Lox(f) => {
+                            if args.len() as u8 != f.arity() {
+                                bail!("Expected {} arguments but got {}", f.arity(), args.len())
+                            }
+                            let res = f.call(arena, Some(env), &resolved_args)?;
+                            res
+                        }
+                        Callable::Native { name, arity, fun } => {
+                            if args.len() as u8 != arity {
+                                bail!(
+                                    "Native function '{name}' expects {} arguments but got {}",
+                                    arity,
+                                    args.len()
+                                )
+                            }
+
+                            fun(&resolved_args)?
+                        }
+                    },
+                    _ => bail!("Can only call functions and classes"),
+                }
             }
         };
 
@@ -260,5 +316,26 @@ impl<'a> Interpreter<'a> {
             Value::Bool(b) => Ok(*b),
             _ => bail!("expected a bool type, got {v}"),
         }
+    }
+
+    fn add_native_functions(env: &Environment) -> Result<()> {
+        env.define(
+            "clock".to_string(),
+            Value::Function(Callable::Native {
+                name: "clock",
+                arity: 0,
+                fun: native::clock,
+            }),
+        );
+
+        env.define(
+            "sleep".to_string(),
+            Value::Function(Callable::Native {
+                name: "sleep",
+                arity: 1,
+                fun: native::sleep,
+            }),
+        );
+        Ok(())
     }
 }

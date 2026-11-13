@@ -29,6 +29,8 @@ impl<'a> Parser<'a> {
             self.print_statement()
         } else if self.match_(|t| matches!(t, TokenType::Var)) {
             self.variable_declaration()
+        } else if self.match_(|t| matches!(t, TokenType::Fun)) {
+            self.function_declaration("function")
         } else if self.match_(|t| matches!(t, TokenType::LeftBrace)) {
             self.block_statement()
         } else if self.match_(|t| matches!(t, TokenType::If)) {
@@ -87,7 +89,6 @@ impl<'a> Parser<'a> {
     }
 
     fn for_statement(&mut self) -> Result<Stmt> {
-        println!("1");
         self.consume(&TokenType::LeftParen, "Expect '(' after 'for'.")?;
 
         let initializer = if self.match_(|t| matches!(t, TokenType::Semicolon)) {
@@ -98,10 +99,7 @@ impl<'a> Parser<'a> {
             Some(self.expression_statement()?)
         };
 
-        println!("2");
-
         let condition = if !self.check(&TokenType::RightParen) {
-            println!("{}", self.tokens[self.current]);
             self.expression()?
         } else {
             // An omitted condition will be 'true'
@@ -109,10 +107,7 @@ impl<'a> Parser<'a> {
         };
         self.consume(&TokenType::Semicolon, "Expect ';' after loop condition")?;
 
-        println!("3");
-
         let increment = if !self.check(&TokenType::RightParen) {
-            println!("{}", self.tokens[self.current]);
             Some(self.expression()?)
         } else {
             None
@@ -180,6 +175,37 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Var {
             identifier,
             initializer,
+        })
+    }
+
+    fn function_declaration(&mut self, kind: &str) -> Result<Stmt> {
+        let name = self
+            .consume(&TokenType::Ident("placeholder".to_string()), "HELP!!!")?
+            .expect("unreachable")
+            .ty;
+
+        self.consume(&TokenType::LeftParen, &format!("Expect {kind} name"))?;
+
+        let mut params = vec![];
+        if !self.check(&TokenType::RightParen) {
+            self.add_param(&mut params)?;
+            while self.match_(|t| matches!(t, TokenType::Comma)) {
+                self.add_param(&mut params)?;
+            }
+        }
+        self.consume(&TokenType::RightParen, "Expect ')' after parameters.")?;
+        self.consume(
+            &TokenType::LeftBrace,
+            &format!("Expect '{{' before {kind} body."),
+        )?;
+
+        let body = self.block_statement()?;
+        debug_assert!(matches!(body, Stmt::Block(_)));
+
+        Ok(Stmt::FunctionDef {
+            name,
+            params,
+            body: Box::new(body),
         })
     }
 
@@ -284,7 +310,20 @@ impl<'a> Parser<'a> {
             let right = self.unary()?;
             return Ok(Expr::unary(operator, right));
         }
-        return self.primary();
+        self.function_call()
+    }
+
+    fn function_call(&mut self) -> Result<Expr> {
+        let mut expr = self.primary()?;
+        loop {
+            if self.match_(|t| matches!(t, TokenType::LeftParen)) {
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
     }
 
     fn primary(&mut self) -> Result<Expr> {
@@ -326,8 +365,16 @@ impl<'a> Parser<'a> {
     }
 
     fn consume(&mut self, cond: &TokenType, err_msg: &str) -> Result<Option<Token>> {
-        if self.check(cond) {
-            return Ok(self.advance());
+        match cond {
+            // We don't care about the contents of the identifier, only the type
+            TokenType::Ident(_) if matches!(self.peek().ty, TokenType::Ident(_)) => {
+                return Ok(self.advance());
+            }
+            _ => {
+                if self.check(cond) {
+                    return Ok(self.advance());
+                }
+            }
         }
 
         bail!(Lox::error(self.peek(), err_msg))
@@ -356,6 +403,46 @@ impl<'a> Parser<'a> {
 
     fn is_eof(&self) -> bool {
         matches!(self.peek().ty, TokenType::EOF)
+    }
+
+    fn add_param(&mut self, params: &mut Vec<TokenType>) -> Result<()> {
+        if params.len() > 255 {
+            bail!(Lox::error(
+                self.peek(),
+                "Can't have more than 255 parameters"
+            ));
+        }
+        let param = self
+            .consume(
+                &TokenType::Ident("placeholder".to_string()),
+                "Expect parameter name",
+            )?
+            .expect("unreachable");
+        params.push(param.ty);
+        Ok(())
+    }
+
+    fn finish_call(&mut self, callee: Expr) -> Result<Expr> {
+        let mut args = vec![];
+        if !self.check(&TokenType::RightParen) {
+            args.push(self.expression()?);
+            while self.match_(|t| matches!(t, TokenType::Comma)) {
+                if args.len() > 255 {
+                    bail!(Lox::error(
+                        self.peek(),
+                        "Can't have more than 255 function arguments"
+                    ))
+                }
+                args.push(self.expression()?);
+            }
+        }
+
+        let paren = self
+            .consume(&TokenType::RightParen, "Expect ')' after arguments")?
+            .unwrap()
+            .ty;
+
+        Ok(Expr::function_call(callee, paren, args))
     }
 
     // TODO: Need to figure out how to incorporate this (see bottom of page 118 in `Crafting Interpreters`)

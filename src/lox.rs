@@ -1,5 +1,6 @@
 mod ast;
 mod environment;
+mod function;
 mod interpreter;
 mod parser;
 mod scanner;
@@ -18,8 +19,7 @@ impl Lox {
         let mut parser = Parser::new(&tokens);
         let stmts = parser.parse()?;
         let arena = Bump::new();
-        let mut interpreter = Interpreter::new(&arena);
-        interpreter.interpret(&stmts)?;
+        Interpreter::interpret(&arena, None, &stmts)?;
         Ok(())
     }
 
