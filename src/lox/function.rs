@@ -39,7 +39,7 @@ impl LoxCallable for LoxFunction {
         if let Stmt::FunctionDef { params, body, .. } = &self.fun_decl {
             for i in 0..params.len() {
                 env.define(
-                    params.get(i).unwrap().lexeme(),
+                    params.get(i).unwrap().ty.lexeme(),
                     args.get(i).unwrap().clone(),
                 );
             }
@@ -57,7 +57,7 @@ impl LoxCallable for LoxFunction {
 impl Display for LoxFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match &self.fun_decl {
-            Stmt::FunctionDef { name, .. } => name.lexeme(),
+            Stmt::FunctionDef { name, .. } => name.ty.lexeme(),
             _ => unreachable!(),
         };
 

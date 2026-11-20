@@ -3,6 +3,7 @@ mod environment;
 mod function;
 mod interpreter;
 mod parser;
+mod resolver;
 mod scanner;
 mod token;
 
@@ -23,7 +24,7 @@ impl Lox {
         Ok(())
     }
 
-    pub fn error(token: Token, msg: &str) -> String {
+    pub fn error(token: &Token, msg: &str) -> String {
         if token.ty.eq(&TokenType::EOF) {
             return Self::report(Some(token.line), Some("at end".to_string()), msg);
         } else {

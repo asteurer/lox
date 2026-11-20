@@ -1,31 +1,31 @@
-use crate::lox::token::TokenType;
+use crate::lox::token::{Token, TokenType};
 
 #[derive(Clone, Debug)]
 pub enum Expr {
-    Literal(TokenType),
+    Literal(Token),
     Grouping(Box<Expr>),
     Unary {
-        operator: TokenType,
+        operator: Token,
         expr: Box<Expr>,
     },
     Binary {
         left: Box<Expr>,
-        operator: TokenType,
+        operator: Token,
         right: Box<Expr>,
     },
     Assign {
-        name: TokenType,
+        name: Token,
         value: Box<Expr>,
     },
-    Variable(TokenType),
+    Variable(Token),
     Logical {
         left: Box<Expr>,
-        operator: TokenType,
+        operator: Token,
         right: Box<Expr>,
     },
     FunctionCall {
         callee: Box<Expr>,
-        paren: TokenType,
+        paren: Token,
         args: Vec<Expr>,
     },
 }
@@ -35,24 +35,24 @@ impl Expr {
         Expr::Grouping(Box::new(expr))
     }
 
-    pub fn assign(name: TokenType, value: Expr) -> Expr {
+    pub fn assign(name: Token, value: Expr) -> Expr {
         Expr::Assign {
             name: name,
             value: Box::new(value),
         }
     }
 
-    pub fn unary(operator: TokenType, expr: Expr) -> Expr {
-        debug_assert!(matches!(operator, TokenType::Bang | TokenType::Minus));
+    pub fn unary(operator: Token, expr: Expr) -> Expr {
+        debug_assert!(matches!(operator.ty, TokenType::Bang | TokenType::Minus));
         Expr::Unary {
             operator,
             expr: Box::new(expr),
         }
     }
 
-    pub fn binary(left: Expr, operator: TokenType, right: Expr) -> Expr {
+    pub fn binary(left: Expr, operator: Token, right: Expr) -> Expr {
         debug_assert!(matches!(
-            operator,
+            operator.ty,
             TokenType::BangEqual
                 | TokenType::EqualEqual
                 | TokenType::LessEqual
@@ -72,8 +72,8 @@ impl Expr {
         }
     }
 
-    pub fn logical(left: Expr, operator: TokenType, right: Expr) -> Expr {
-        debug_assert!(matches!(operator, TokenType::And | TokenType::Or));
+    pub fn logical(left: Expr, operator: Token, right: Expr) -> Expr {
+        debug_assert!(matches!(operator.ty, TokenType::And | TokenType::Or));
         Expr::Logical {
             left: Box::new(left),
             operator,
@@ -81,7 +81,7 @@ impl Expr {
         }
     }
 
-    pub fn function_call(callee: Expr, paren: TokenType, args: Vec<Expr>) -> Expr {
+    pub fn function_call(callee: Expr, paren: Token, args: Vec<Expr>) -> Expr {
         Expr::FunctionCall {
             callee: Box::new(callee),
             paren,
@@ -93,7 +93,7 @@ impl Expr {
     /// TODO: This is here for debugging
     pub fn parenthesize(expr: &Expr) -> String {
         let expr_string = match expr {
-            Expr::Literal(v) => return v.lexeme(),
+            Expr::Literal(v) => return v.ty.lexeme(),
             Expr::Binary {
                 left,
                 operator,
@@ -101,7 +101,7 @@ impl Expr {
             } => {
                 format!(
                     "{} {} {}",
-                    operator.lexeme(),
+                    operator.ty.lexeme(),
                     Expr::parenthesize(&**left),
                     Expr::parenthesize(&**right)
                 )
@@ -110,12 +110,16 @@ impl Expr {
                 format!("group {}", Expr::parenthesize(&**v),)
             }
             Expr::Unary { operator, expr } => {
-                format!("{} {}", operator.lexeme(), Expr::parenthesize(&**expr))
+                format!("{} {}", operator.ty.lexeme(), Expr::parenthesize(&**expr))
             }
             Expr::Assign { name, value } => {
-                format!("assign {} {}", name.lexeme(), Expr::parenthesize(&**value))
+                format!(
+                    "assign {} {}",
+                    name.ty.lexeme(),
+                    Expr::parenthesize(&**value)
+                )
             }
-            Expr::Variable(name) => format!("var {}", name.lexeme()),
+            Expr::Variable(name) => format!("var {}", name.ty.lexeme()),
             Expr::Logical {
                 left,
                 operator,
@@ -123,7 +127,7 @@ impl Expr {
             } => {
                 format!(
                     "{} {} {}",
-                    operator.lexeme(),
+                    operator.ty.lexeme(),
                     Expr::parenthesize(&**left),
                     Expr::parenthesize(&**right)
                 )
@@ -149,11 +153,11 @@ pub enum Stmt {
     Expr(Expr),
     Print(Expr),
     Var {
-        identifier: TokenType,
+        identifier: Token,
         initializer: Option<Expr>,
     },
     Return {
-        keyword: TokenType,
+        keyword: Token,
         value: Option<Expr>,
     },
     Block(Vec<Stmt>),
@@ -167,8 +171,8 @@ pub enum Stmt {
         body: Box<Stmt>,
     },
     FunctionDef {
-        name: TokenType,
-        params: Vec<TokenType>,
+        name: Token,
+        params: Vec<Token>,
         body: Box<Stmt>,
     },
 }
@@ -186,7 +190,7 @@ impl Stmt {
                     .as_ref()
                     .and_then(|expr| Some(Expr::parenthesize(expr)))
                     .unwrap_or(String::from("nil"));
-                format!("var {} {val}", identifier.lexeme())
+                format!("var {} {val}", identifier.ty.lexeme())
             }
             Stmt::Block(stmts) => {
                 let mut statements = String::new();
@@ -232,7 +236,7 @@ else {}"#,
             Stmt::FunctionDef { name, params, body } => {
                 let params = params
                     .iter()
-                    .map(|p| format!("{}", p.lexeme()))
+                    .map(|p| format!("{}", p.ty.lexeme()))
                     .collect::<Vec<String>>()
                     .join(", ");
                 format!(
@@ -240,7 +244,7 @@ else {}"#,
   params ({})
   body {}
 )"#,
-                    name.lexeme(),
+                    name.ty.lexeme(),
                     params,
                     Stmt::parenthesize(body)
                 )

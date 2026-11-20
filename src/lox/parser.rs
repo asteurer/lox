@@ -105,7 +105,10 @@ impl<'a> Parser<'a> {
             self.expression()?
         } else {
             // An omitted condition will be 'true'
-            Expr::Literal(TokenType::True)
+            Expr::Literal(Token {
+                ty: TokenType::True,
+                line: self.tokens.get(self.current).unwrap().line,
+            })
         };
         self.consume(&TokenType::Semicolon, "Expect ';' after loop condition")?;
 
@@ -155,16 +158,16 @@ impl<'a> Parser<'a> {
         self.consume(&TokenType::Semicolon, "Expect ';' after return value")?;
 
         Ok(Stmt::Return {
-            keyword: keyword.ty,
+            keyword: keyword,
             value,
         })
     }
 
     fn variable_declaration(&mut self) -> Result<Stmt> {
         let identifier = match self.advance() {
-            Some(Token { ty, line: _ }) => {
-                debug_assert!(matches!(ty, TokenType::Ident(_)));
-                ty
+            Some(t) => {
+                debug_assert!(matches!(t.ty, TokenType::Ident(_)));
+                t
             }
             _ => bail!("Expect identifier in variable declaration"),
         };
@@ -197,8 +200,7 @@ impl<'a> Parser<'a> {
     fn function_declaration(&mut self, kind: &str) -> Result<Stmt> {
         let name = self
             .consume(&TokenType::Ident("placeholder".to_string()), "HELP!!!")?
-            .expect("unreachable")
-            .ty;
+            .expect("unreachable");
 
         self.consume(&TokenType::LeftParen, &format!("Expect {kind} name"))?;
 
@@ -237,10 +239,10 @@ impl<'a> Parser<'a> {
             let value = self.assignment()?;
 
             match &expr {
-                Expr::Variable(tt @ TokenType::Ident(_)) => {
+                Expr::Variable(tt) if matches!(tt.ty, TokenType::Ident(_)) => {
                     expr = Expr::assign(tt.to_owned(), value)
                 }
-                _ => bail!(Lox::error(equals, "Invalid assignment target.")),
+                _ => bail!(Lox::error(&equals, "Invalid assignment target.")),
             }
         }
 
@@ -250,7 +252,7 @@ impl<'a> Parser<'a> {
     fn logical_or(&mut self) -> Result<Expr> {
         let mut expr = self.logical_and()?;
         while self.match_(|t| matches!(t, TokenType::Or)) {
-            let operator = self.previous().ty;
+            let operator = self.previous();
             let right = self.logical_and()?;
             expr = Expr::logical(expr, operator, right);
         }
@@ -261,7 +263,7 @@ impl<'a> Parser<'a> {
     fn logical_and(&mut self) -> Result<Expr> {
         let mut expr = self.equality()?;
         while self.match_(|t| matches!(t, TokenType::And)) {
-            let operator = self.previous().ty;
+            let operator = self.previous();
             let right = self.equality()?;
             expr = Expr::logical(expr, operator, right);
         }
@@ -272,7 +274,7 @@ impl<'a> Parser<'a> {
     fn equality(&mut self) -> Result<Expr> {
         let mut expr = self.comparison()?;
         while self.match_(|t| matches!(t, TokenType::EqualEqual | TokenType::BangEqual)) {
-            let operator = self.previous().ty;
+            let operator = self.previous();
             let right = self.term()?;
             expr = Expr::binary(expr, operator, right);
         }
@@ -291,7 +293,7 @@ impl<'a> Parser<'a> {
                     | TokenType::LessEqual
             )
         }) {
-            let operator = self.previous().ty;
+            let operator = self.previous();
             let right = self.term()?;
             expr = Expr::binary(expr, operator, right);
         }
@@ -302,7 +304,7 @@ impl<'a> Parser<'a> {
     fn term(&mut self) -> Result<Expr> {
         let mut expr = self.factor()?;
         while self.match_(|t| matches!(t, TokenType::Minus | TokenType::Plus)) {
-            let operator = self.previous().ty;
+            let operator = self.previous();
             let right = self.factor()?;
             expr = Expr::binary(expr, operator, right)
         }
@@ -313,7 +315,7 @@ impl<'a> Parser<'a> {
     fn factor(&mut self) -> Result<Expr> {
         let mut expr = self.unary()?;
         while self.match_(|t| matches!(t, TokenType::Slash | TokenType::Star)) {
-            let operator = self.previous().ty;
+            let operator = self.previous();
             let right = self.unary()?;
             expr = Expr::binary(expr, operator, right)
         }
@@ -322,7 +324,7 @@ impl<'a> Parser<'a> {
 
     fn unary(&mut self) -> Result<Expr> {
         if self.match_(|t| matches!(t, TokenType::Bang | TokenType::Minus)) {
-            let operator = self.previous().ty;
+            let operator = self.previous();
             let right = self.unary()?;
             return Ok(Expr::unary(operator, right));
         }
@@ -353,11 +355,11 @@ impl<'a> Parser<'a> {
                     | TokenType::Str(_)
             )
         }) {
-            return Ok(Expr::Literal(self.previous().ty));
+            return Ok(Expr::Literal(self.previous()));
         }
 
         if self.match_(|t| matches!(t, TokenType::Ident(_))) {
-            return Ok(Expr::Variable(self.previous().ty));
+            return Ok(Expr::Variable(self.previous()));
         }
 
         if self.match_(|t| matches!(t, TokenType::LeftParen)) {
@@ -366,7 +368,7 @@ impl<'a> Parser<'a> {
             return Ok(Expr::grouping(expr));
         }
 
-        bail!(Lox::error(self.peek(), "Expect expression."))
+        bail!(Lox::error(&self.peek(), "Expect expression."))
     }
 
     // --- Helper Methods
@@ -393,7 +395,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        bail!(Lox::error(self.peek(), err_msg))
+        bail!(Lox::error(&self.peek(), err_msg))
     }
 
     fn check(&self, ty: &TokenType) -> bool {
@@ -421,10 +423,10 @@ impl<'a> Parser<'a> {
         matches!(self.peek().ty, TokenType::EOF)
     }
 
-    fn add_param(&mut self, params: &mut Vec<TokenType>) -> Result<()> {
+    fn add_param(&mut self, params: &mut Vec<Token>) -> Result<()> {
         if params.len() > 255 {
             bail!(Lox::error(
-                self.peek(),
+                &self.peek(),
                 "Can't have more than 255 parameters"
             ));
         }
@@ -434,7 +436,7 @@ impl<'a> Parser<'a> {
                 "Expect parameter name",
             )?
             .expect("unreachable");
-        params.push(param.ty);
+        params.push(param);
         Ok(())
     }
 
@@ -445,7 +447,7 @@ impl<'a> Parser<'a> {
             while self.match_(|t| matches!(t, TokenType::Comma)) {
                 if args.len() > 255 {
                     bail!(Lox::error(
-                        self.peek(),
+                        &self.peek(),
                         "Can't have more than 255 function arguments"
                     ))
                 }
@@ -455,8 +457,7 @@ impl<'a> Parser<'a> {
 
         let paren = self
             .consume(&TokenType::RightParen, "Expect ')' after arguments")?
-            .unwrap()
-            .ty;
+            .unwrap();
 
         Ok(Expr::function_call(callee, paren, args))
     }

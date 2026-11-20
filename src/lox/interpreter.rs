@@ -1,4 +1,5 @@
 use crate::lox::{
+    Lox,
     ast::{Expr, Stmt},
     environment::Environment,
     function::{LoxCallable, LoxFunction, native},
@@ -14,6 +15,7 @@ macro_rules! binary_number {
             (Value::Number(left), Value::Number(right)) => {
                 return Ok(Value::$ctor(left $op right));
             }
+            // TODO: This should be a Lox::error
             _ => bail!("The `{}` operator can only be used on numbers", stringify!($op))
         }
     }};
@@ -48,6 +50,7 @@ macro_rules! binary_equality {
             | (Value::Bool(_), Value::String(_) | Value::Number(_)) => {
                 return Ok(Value::Bool(true $op false));
             }
+            // TODO: This should be a Lox::error
             (Value::Function(_), _) | (_, Value::Function(_)) => {
                 anyhow::bail!("Functions aren't currently comparable.")
             }
@@ -73,6 +76,7 @@ pub enum Value {
     Function(Callable),
 }
 
+// TODO: Need to store a line number for callables
 #[derive(Clone, Debug)]
 pub enum Callable {
     Lox(LoxFunction),
@@ -131,7 +135,7 @@ impl Interpreter {
                 identifier,
                 initializer,
             } => {
-                let name = match identifier {
+                let name = match &identifier.ty {
                     TokenType::Ident(i) => i.to_owned(),
                     _ => unreachable!(),
                 };
@@ -174,11 +178,11 @@ impl Interpreter {
             }
             Stmt::FunctionDef { name, .. } => {
                 env.define(
-                    name.lexeme(),
+                    name.ty.lexeme(),
                     Value::Function(Callable::Lox(LoxFunction::new(stmt))),
                 );
             }
-            Stmt::Return { keyword, value } => {
+            Stmt::Return { value, .. } => {
                 let mut ret_val = ControlFlow::None;
                 if let Some(v) = value {
                     ret_val = ControlFlow::Return(Interpreter::evaluate_expr(arena, env, v)?);
@@ -193,7 +197,7 @@ impl Interpreter {
 
     fn evaluate_expr(arena: &Bump, env: &Environment, expr: &Expr) -> Result<Value> {
         let result = match expr {
-            Expr::Literal(tt) => match tt {
+            Expr::Literal(t) => match &t.ty {
                 TokenType::Str(s) => Value::String(s.to_owned()),
                 TokenType::Num(n) => Value::Number(*n),
                 TokenType::False => Value::Bool(false),
@@ -201,11 +205,11 @@ impl Interpreter {
                 TokenType::Nil => Value::Nil,
                 _ => unreachable!(),
             },
-            Expr::Variable(tt) => env.get(&tt.lexeme())?,
+            Expr::Variable(t) => env.get(&t.ty.lexeme())?,
             Expr::Grouping(expr) => Interpreter::evaluate_expr(arena, env, expr)?,
             Expr::Unary { operator, expr } => {
                 let resolved = Interpreter::evaluate_expr(arena, env, expr)?;
-                match operator {
+                match operator.ty {
                     TokenType::Bang => {
                         let val = match resolved {
                             Value::Nil => false,
@@ -218,7 +222,10 @@ impl Interpreter {
                         if let Value::Number(n) = resolved {
                             Value::Number(-n)
                         } else {
-                            bail!("The minus (`-`) unary operator can only be used on numbers");
+                            bail!(Lox::error(
+                                operator,
+                                "The minus (`-`) unary operator can only be used on numbers"
+                            ));
                         }
                     }
                     _ => unreachable!(),
@@ -226,7 +233,7 @@ impl Interpreter {
             }
             Expr::Assign { name, value } => {
                 let resolved = Interpreter::evaluate_expr(arena, env, value)?;
-                env.assign(&name.lexeme(), resolved.clone())?;
+                env.assign(&name.ty.lexeme(), resolved.clone())?;
                 resolved
             }
             Expr::Binary {
@@ -237,7 +244,7 @@ impl Interpreter {
                 let left_resolved = Interpreter::evaluate_expr(arena, env, &**left)?;
                 let right_resolved = Interpreter::evaluate_expr(arena, env, &**right)?;
 
-                match operator {
+                match operator.ty {
                     TokenType::Minus => {
                         binary_number!(Number, -, left_resolved, right_resolved)
                     }
@@ -272,9 +279,10 @@ impl Interpreter {
                         (Value::Number(lhs), Value::Number(rhs)) => {
                             return Ok(Value::Number(lhs + rhs));
                         }
-                        _ => bail!(
+                        _ => bail!(Lox::error(
+                            operator,
                             "The plus (`+`) binary operator can only be used with numbers or strings"
-                        ),
+                        )),
                     },
                     _ => unreachable!(),
                 }
@@ -287,7 +295,7 @@ impl Interpreter {
                 let left = Interpreter::evaluate_expr(arena, env, left)?;
                 let left_inner = Interpreter::extract_bool(&left)?;
 
-                if matches!(operator, TokenType::Or) {
+                if matches!(operator.ty, TokenType::Or) {
                     // Short circuit 'or'
                     if left_inner {
                         return Ok(left);
@@ -301,7 +309,11 @@ impl Interpreter {
 
                 Interpreter::evaluate_expr(arena, env, right)?
             }
-            Expr::FunctionCall { callee, args, .. } => {
+            Expr::FunctionCall {
+                callee,
+                args,
+                paren,
+            } => {
                 let mut resolved_args = vec![];
                 for arg in args {
                     resolved_args.push(Interpreter::evaluate_expr(arena, env, arg)?);
@@ -311,13 +323,21 @@ impl Interpreter {
                     Value::Function(callable) => match callable {
                         Callable::Lox(f) => {
                             if args.len() as u8 != f.arity() {
-                                bail!("Expected {} arguments but got {}", f.arity(), args.len())
+                                bail!(Lox::error(
+                                    paren,
+                                    &format!(
+                                        "Expected {} arguments but got {}",
+                                        f.arity(),
+                                        args.len()
+                                    )
+                                ))
                             }
                             let res = f.call(arena, Some(env), &resolved_args)?;
                             return Ok(res);
                         }
                         Callable::Native { name, arity, fun } => {
                             if args.len() as u8 != arity {
+                                // TODO: This should be a Lox::error
                                 bail!(
                                     "Native function '{name}' expects {} arguments but got {}",
                                     arity,
@@ -328,7 +348,7 @@ impl Interpreter {
                             return Ok(fun(&resolved_args)?);
                         }
                     },
-                    _ => bail!("Can only call functions and classes"),
+                    _ => bail!(Lox::error(paren, "Can only call functions and classes")),
                 }
             }
         };
@@ -339,6 +359,7 @@ impl Interpreter {
     fn extract_bool(v: &Value) -> Result<bool> {
         match v {
             Value::Bool(b) => Ok(*b),
+            // TODO: This should be a Lox::error
             _ => bail!("expected a bool type, got {v}"),
         }
     }
