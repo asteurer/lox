@@ -3,7 +3,7 @@ use std::fmt::Display;
 use crate::lox::{
     ast::Stmt,
     environment::Environment,
-    interpreter::{Interpreter, Value},
+    interpreter::{ControlFlow, Interpreter, Value},
 };
 use anyhow::{Result, bail};
 use bumpalo::Bump;
@@ -44,8 +44,10 @@ impl LoxCallable for LoxFunction {
                 );
             }
 
-            Interpreter::interpret(arena, Some(env), std::slice::from_ref(body))?;
-            Ok(Value::Nil)
+            match Interpreter::execute_statement(arena, env, body)? {
+                ControlFlow::None => Ok(Value::Nil),
+                ControlFlow::Return(v) => Ok(v),
+            }
         } else {
             bail!("Expected LoxFunction.func_decl to be type Stmt::Function");
         }

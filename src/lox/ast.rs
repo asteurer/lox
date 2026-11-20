@@ -152,6 +152,10 @@ pub enum Stmt {
         identifier: TokenType,
         initializer: Option<Expr>,
     },
+    Return {
+        keyword: TokenType,
+        value: Option<Expr>,
+    },
     Block(Vec<Stmt>),
     If {
         condition: Expr,
@@ -240,6 +244,13 @@ else {}"#,
                     params,
                     Stmt::parenthesize(body)
                 )
+            }
+            Stmt::Return { value, .. } => {
+                if let Some(v) = value {
+                    return format!("return {}", Expr::parenthesize(v));
+                }
+
+                format!("return")
             }
         };
 

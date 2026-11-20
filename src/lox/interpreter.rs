@@ -55,6 +55,15 @@ macro_rules! binary_equality {
     }};
 }
 
+macro_rules! parse_control_flow {
+    ($stmt:expr) => {
+        match $stmt {
+            ControlFlow::None => {}
+            return_val => return Ok(return_val),
+        }
+    };
+}
+
 #[derive(Clone, Debug)]
 pub enum Value {
     Nil,
@@ -89,6 +98,11 @@ impl std::fmt::Display for Value {
     }
 }
 
+pub enum ControlFlow {
+    Return(Value),
+    None,
+}
+
 pub struct Interpreter;
 
 impl Interpreter {
@@ -96,13 +110,15 @@ impl Interpreter {
         let env = Environment::new_in(arena, enclosing);
         Interpreter::add_native_functions(env)?;
 
-        ast.iter().try_for_each(|s| {
-            // println!("{}", Stmt::parenthesize(s));
-            Interpreter::execute_statement(arena, env, s)
-        })
+        for stmt in ast {
+            println!("STATEMENT: {}", Stmt::parenthesize(stmt));
+            Interpreter::execute_statement(arena, env, stmt)?;
+        }
+
+        Ok(())
     }
 
-    fn execute_statement(arena: &Bump, env: &Environment, stmt: &Stmt) -> Result<()> {
+    pub fn execute_statement(arena: &Bump, env: &Environment, stmt: &Stmt) -> Result<ControlFlow> {
         match stmt {
             Stmt::Expr(expr) => {
                 Interpreter::evaluate_expr(arena, env, expr)?;
@@ -129,7 +145,7 @@ impl Interpreter {
             Stmt::Block(stmts) => {
                 let env = Environment::new_in(arena, Some(env));
                 for stmt in stmts {
-                    Interpreter::execute_statement(arena, env, stmt)?;
+                    parse_control_flow!(Interpreter::execute_statement(arena, env, stmt)?)
                 }
             }
             Stmt::If {
@@ -142,18 +158,18 @@ impl Interpreter {
                 let condition_inner = Interpreter::extract_bool(&condition)?;
 
                 if condition_inner {
-                    Interpreter::execute_statement(arena, env, then_branch)?;
+                    parse_control_flow!(Interpreter::execute_statement(arena, env, then_branch)?)
                 }
 
                 if !condition_inner && let Some(stmt) = else_branch {
-                    Interpreter::execute_statement(arena, env, stmt)?;
+                    parse_control_flow!(Interpreter::execute_statement(arena, env, stmt)?)
                 }
             }
             Stmt::While { condition, body } => {
                 while Interpreter::extract_bool(&Interpreter::evaluate_expr(
                     arena, env, condition,
                 )?)? {
-                    Interpreter::execute_statement(arena, env, body)?;
+                    parse_control_flow!(Interpreter::execute_statement(arena, env, body)?)
                 }
             }
             Stmt::FunctionDef { name, .. } => {
@@ -162,8 +178,17 @@ impl Interpreter {
                     Value::Function(Callable::Lox(LoxFunction::new(stmt))),
                 );
             }
+            Stmt::Return { keyword, value } => {
+                let mut ret_val = ControlFlow::None;
+                if let Some(v) = value {
+                    ret_val = ControlFlow::Return(Interpreter::evaluate_expr(arena, env, v)?);
+                }
+
+                return Ok(ret_val);
+            }
         }
-        Ok(())
+
+        Ok(ControlFlow::None)
     }
 
     fn evaluate_expr(arena: &Bump, env: &Environment, expr: &Expr) -> Result<Value> {
@@ -289,7 +314,7 @@ impl Interpreter {
                                 bail!("Expected {} arguments but got {}", f.arity(), args.len())
                             }
                             let res = f.call(arena, Some(env), &resolved_args)?;
-                            res
+                            return Ok(res);
                         }
                         Callable::Native { name, arity, fun } => {
                             if args.len() as u8 != arity {
@@ -300,7 +325,7 @@ impl Interpreter {
                                 )
                             }
 
-                            fun(&resolved_args)?
+                            return Ok(fun(&resolved_args)?);
                         }
                     },
                     _ => bail!("Can only call functions and classes"),
