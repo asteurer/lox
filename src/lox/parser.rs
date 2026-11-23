@@ -2,18 +2,23 @@ use anyhow::{Result, bail};
 
 use crate::lox::{
     Lox,
-    ast::{Expr, Stmt},
+    ast::{Expr, ExprId, Stmt},
     token::{Token, TokenType},
 };
 
 pub struct Parser<'a> {
     tokens: &'a [Token],
     current: usize,
+    next_id: ExprId,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [Token]) -> Self {
-        Parser { tokens, current: 0 }
+        Parser {
+            tokens,
+            current: 0,
+            next_id: 0,
+        }
     }
 
     pub fn parse(&mut self) -> Result<Vec<Stmt>> {
@@ -239,8 +244,8 @@ impl<'a> Parser<'a> {
             let value = self.assignment()?;
 
             match &expr {
-                Expr::Variable(tt) if matches!(tt.ty, TokenType::Ident(_)) => {
-                    expr = Expr::assign(tt.to_owned(), value)
+                Expr::Variable { name, id } if matches!(name.ty, TokenType::Ident(_)) => {
+                    expr = Expr::assign(name.to_owned(), value, *id)
                 }
                 _ => bail!(Lox::error(&equals, "Invalid assignment target.")),
             }
@@ -359,7 +364,10 @@ impl<'a> Parser<'a> {
         }
 
         if self.match_(|t| matches!(t, TokenType::Ident(_))) {
-            return Ok(Expr::Variable(self.previous()));
+            return Ok(Expr::Variable {
+                name: self.previous(),
+                id: self.next_id(),
+            });
         }
 
         if self.match_(|t| matches!(t, TokenType::LeftParen)) {
@@ -460,6 +468,11 @@ impl<'a> Parser<'a> {
             .unwrap();
 
         Ok(Expr::function_call(callee, paren, args))
+    }
+
+    fn next_id(&mut self) -> ExprId {
+        self.next_id += 1;
+        self.next_id
     }
 
     // TODO: Need to figure out how to incorporate this (see bottom of page 118 in `Crafting Interpreters`)

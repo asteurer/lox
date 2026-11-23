@@ -1,7 +1,7 @@
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::lox::{
-    ast::Stmt,
+    ast::{ExprId, Stmt},
     environment::Environment,
     interpreter::{ControlFlow, Interpreter, Value},
 };
@@ -9,7 +9,13 @@ use anyhow::{Result, bail};
 use bumpalo::Bump;
 
 pub trait LoxCallable {
-    fn call(&self, arena: &Bump, env: Option<&Environment>, args: &[Value]) -> Result<Value>;
+    fn call(
+        &self,
+        arena: &Bump,
+        env: Option<&Environment>,
+        args: &[Value],
+        locals: &mut HashMap<ExprId, usize>,
+    ) -> Result<Value>;
     fn arity(&self) -> u8;
 }
 
@@ -34,7 +40,13 @@ impl LoxCallable for LoxFunction {
         }
     }
 
-    fn call(&self, arena: &Bump, env: Option<&Environment>, args: &[Value]) -> Result<Value> {
+    fn call(
+        &self,
+        arena: &Bump,
+        env: Option<&Environment>,
+        args: &[Value],
+        locals: &mut HashMap<ExprId, usize>,
+    ) -> Result<Value> {
         let env = Environment::new_in(arena, env);
         if let Stmt::FunctionDef { params, body, .. } = &self.fun_decl {
             for i in 0..params.len() {
@@ -44,7 +56,7 @@ impl LoxCallable for LoxFunction {
                 );
             }
 
-            match Interpreter::execute_statement(arena, env, body)? {
+            match Interpreter::execute_statement(arena, env, body, locals)? {
                 ControlFlow::None => Ok(Value::Nil),
                 ControlFlow::Return(v) => Ok(v),
             }

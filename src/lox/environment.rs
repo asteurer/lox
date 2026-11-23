@@ -33,6 +33,22 @@ impl<'a> Environment<'a> {
         }
     }
 
+    pub fn get_at(&self, distance: &usize, name: String) -> Result<Value> {
+        if let Some(env) = self.ancestor(distance) {
+            return env.get(&name);
+        }
+        bail!("Undefined variable '{name}'")
+    }
+
+    fn ancestor(&self, distance: &usize) -> Option<&Environment<'_>> {
+        let mut env = Some(self);
+        for _ in 0..*distance {
+            env = self.enclosing;
+        }
+
+        env
+    }
+
     pub fn assign(&self, name: &str, value: Value) -> Result<()> {
         match (self.values.borrow_mut().get_mut(name), self.enclosing) {
             (Some(v), _) => *v = value,
@@ -40,6 +56,14 @@ impl<'a> Environment<'a> {
             _ => bail!("Undefined variable '{name}'"),
         }
         Ok(())
+    }
+
+    pub fn assign_at(&self, distance: &usize, name: &str, value: Value) -> Result<()> {
+        if let Some(env) = self.ancestor(distance) {
+            env.assign(&name, value)
+        } else {
+            bail!("Undefined variable '{name}'")
+        }
     }
 
     /// TODO: This is here for debugging

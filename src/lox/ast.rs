@@ -1,5 +1,7 @@
 use crate::lox::token::{Token, TokenType};
 
+pub type ExprId = usize;
+
 #[derive(Clone, Debug)]
 pub enum Expr {
     Literal(Token),
@@ -14,10 +16,14 @@ pub enum Expr {
         right: Box<Expr>,
     },
     Assign {
+        id: ExprId,
         name: Token,
         value: Box<Expr>,
     },
-    Variable(Token),
+    Variable {
+        id: ExprId,
+        name: Token,
+    },
     Logical {
         left: Box<Expr>,
         operator: Token,
@@ -35,9 +41,10 @@ impl Expr {
         Expr::Grouping(Box::new(expr))
     }
 
-    pub fn assign(name: Token, value: Expr) -> Expr {
+    pub fn assign(name: Token, value: Expr, id: ExprId) -> Expr {
         Expr::Assign {
-            name: name,
+            id,
+            name,
             value: Box::new(value),
         }
     }
@@ -112,14 +119,14 @@ impl Expr {
             Expr::Unary { operator, expr } => {
                 format!("{} {}", operator.ty.lexeme(), Expr::parenthesize(&**expr))
             }
-            Expr::Assign { name, value } => {
+            Expr::Assign { name, value, .. } => {
                 format!(
                     "assign {} {}",
                     name.ty.lexeme(),
                     Expr::parenthesize(&**value)
                 )
             }
-            Expr::Variable(name) => format!("var {}", name.ty.lexeme()),
+            Expr::Variable { name, .. } => format!("var {}", name.ty.lexeme()),
             Expr::Logical {
                 left,
                 operator,
