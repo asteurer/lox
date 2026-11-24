@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::lox::{
     Lox,
     ast::{Expr, ExprId, Stmt},
+    class::{Class, Instance},
     environment::Environment,
     function::{LoxCallable, LoxFunction, native},
     resolver::Resolver,
@@ -54,8 +55,8 @@ macro_rules! binary_equality {
                 return Ok(Value::Bool(true $op false));
             }
             // TODO: This should be a Lox::error
-            (Value::Function(_), _) | (_, Value::Function(_)) => {
-                anyhow::bail!("Functions aren't currently comparable.")
+            (Value::Function(_), _) | (_, Value::Function(_)) | (Value::ClassInstance(_), _) | (_, Value::ClassInstance(_)) => {
+                anyhow::bail!("Functions and ClassInstances aren't yet comparable.")
             }
         }
     }};
@@ -77,6 +78,7 @@ pub enum Value {
     Number(f64),
     String(String),
     Function(Callable),
+    ClassInstance(Instance),
 }
 
 // TODO: Need to store a line number for callables
@@ -88,6 +90,7 @@ pub enum Callable {
         arity: u8,
         fun: fn(&[Value]) -> Result<Value>,
     },
+    Class(Class),
 }
 
 impl std::fmt::Display for Value {
@@ -100,7 +103,9 @@ impl std::fmt::Display for Value {
             Value::Function(callable) => match callable {
                 Callable::Lox(fun) => write!(f, "{fun}",),
                 Callable::Native { name, .. } => write!(f, "<native fun {name}>"),
+                Callable::Class(class) => write!(f, "{class}"),
             },
+            Value::ClassInstance(i) => write!(f, "{} instance", i.class.name),
         }
     }
 }
@@ -206,6 +211,20 @@ impl Interpreter {
                 }
 
                 return Ok(ret_val);
+            }
+            Stmt::Class { name, methods } => {
+                env.define(name.ty.lexeme(), Value::Nil);
+
+                let mut collected_methods = HashMap::new();
+                for method in methods {
+                    let Stmt::FunctionDef { name, .. } = method else {
+                        unreachable!("class methods contain non-function statements")
+                    };
+                    collected_methods.insert(name.ty.lexeme(), LoxFunction::new(method));
+                }
+
+                let class = Class::new(name.ty.lexeme(), collected_methods);
+                env.assign(&name.ty.lexeme(), Value::Function(Callable::Class(class)))?;
             }
         }
 
@@ -341,6 +360,30 @@ impl Interpreter {
 
                 Interpreter::evaluate_expr(arena, env, right, locals)?
             }
+            Expr::Get { object, name } => {
+                let obj = Interpreter::evaluate_expr(arena, env, object, locals)?;
+                if let Value::ClassInstance(inst) = obj {
+                    return Ok(inst.get(name)?);
+                } else {
+                    bail!(Lox::error(name, "Only class instances have properties"))
+                }
+            }
+            Expr::Set {
+                value,
+                object,
+                name,
+            } => {
+                let mut obj = Interpreter::evaluate_expr(arena, env, object, locals)?;
+                if let Value::ClassInstance(ref mut i) = obj {
+                    let val = Interpreter::evaluate_expr(arena, env, value, locals)?;
+                    i.set(name, val);
+                } else {
+                    bail!(Lox::error(name, "Only class instances have fields"));
+                }
+
+                // TODO: If this isn't working, check here. The book returns 'val', not 'obj'
+                return Ok(obj);
+            }
             Expr::FunctionCall {
                 callee,
                 args,
@@ -369,17 +412,34 @@ impl Interpreter {
                         }
                         Callable::Native { name, arity, fun } => {
                             if args.len() as u8 != arity {
-                                // TODO: This should be a Lox::error
-                                bail!(
-                                    "Native function '{name}' expects {} arguments but got {}",
-                                    arity,
-                                    args.len()
-                                )
+                                bail!(Lox::error(
+                                    paren,
+                                    &format!(
+                                        "Native function '{name}' expects {} arguments but got {}",
+                                        arity,
+                                        args.len()
+                                    )
+                                ))
                             }
 
                             return Ok(fun(&resolved_args)?);
                         }
+                        Callable::Class(class) => {
+                            if args.len() as u8 != class.arity() {
+                                bail!(Lox::error(
+                                    paren,
+                                    &format!(
+                                        "Expected {} arguments but got {}",
+                                        class.arity(),
+                                        args.len()
+                                    )
+                                ))
+                            }
+
+                            return Ok(class.call(arena, None, &[], locals)?);
+                        }
                     },
+
                     _ => bail!(Lox::error(paren, "Can only call functions and classes")),
                 }
             }

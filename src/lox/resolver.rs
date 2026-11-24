@@ -77,6 +77,18 @@ impl Resolver {
                     Resolver::resolve_stmt(stmt, resolve, locals)?;
                 }
             }
+            Stmt::Class { name, methods } => {
+                Resolver::declare(resolve, name)?;
+                Resolver::define(resolve, name);
+
+                for method in methods {
+                    resolve.fun_type = FunType::Method;
+                    let Stmt::FunctionDef { params, body, .. } = method else {
+                        unreachable!("found non-function statements in class method list")
+                    };
+                    Resolver::resolve_function_stmt(&params, &body, resolve, locals)?;
+                }
+            }
         }
         Ok(())
     }
@@ -147,6 +159,13 @@ impl Resolver {
             Expr::Unary { expr, .. } => {
                 Resolver::resolve_expr(expr, resolve, locals)?;
             }
+            Expr::Get { object, .. } => {
+                Resolver::resolve_expr(object, resolve, locals)?;
+            }
+            Expr::Set { value, object, .. } => {
+                Resolver::resolve_expr(value, resolve, locals)?;
+                Resolver::resolve_expr(object, resolve, locals)?;
+            }
         }
 
         Ok(())
@@ -214,4 +233,5 @@ impl Resolve {
 pub enum FunType {
     None,
     Function,
+    Method,
 }

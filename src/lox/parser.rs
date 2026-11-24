@@ -32,6 +32,8 @@ impl<'a> Parser<'a> {
     fn statement(&mut self) -> Result<Stmt> {
         if self.match_(|t| matches!(t, TokenType::Print)) {
             self.print_statement()
+        } else if self.match_(|t| matches!(t, TokenType::Class)) {
+            self.class_declaration()
         } else if self.match_(|t| matches!(t, TokenType::Var)) {
             self.variable_declaration()
         } else if self.match_(|t| matches!(t, TokenType::Fun)) {
@@ -232,6 +234,25 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn class_declaration(&mut self) -> Result<Stmt> {
+        let name = self
+            .consume(
+                &TokenType::Ident("placeholder".to_string()),
+                "Expect a class name",
+            )?
+            .unwrap();
+        self.consume(&TokenType::LeftBrace, "Expect '{' before class body")?;
+
+        let mut methods = vec![];
+        while !self.check(&TokenType::RightBrace) && !self.is_eof() {
+            methods.push(self.function_declaration("function")?);
+        }
+
+        self.consume(&TokenType::RightBrace, "Expect '}' after class body")?;
+
+        Ok(Stmt::Class { name, methods })
+    }
+
     fn expression(&mut self) -> Result<Expr> {
         self.assignment()
     }
@@ -246,6 +267,9 @@ impl<'a> Parser<'a> {
             match &expr {
                 Expr::Variable { name, id } if matches!(name.ty, TokenType::Ident(_)) => {
                     expr = Expr::assign(name.to_owned(), value, *id)
+                }
+                Expr::Get { object, name } => {
+                    expr = Expr::set(value, *object.to_owned(), name.to_owned())
                 }
                 _ => bail!(Lox::error(&equals, "Invalid assignment target.")),
             }
@@ -341,6 +365,14 @@ impl<'a> Parser<'a> {
         loop {
             if self.match_(|t| matches!(t, TokenType::LeftParen)) {
                 expr = self.finish_call(expr)?;
+            } else if self.match_(|t| matches!(t, TokenType::Dot)) {
+                let name = self
+                    .consume(
+                        &TokenType::Ident("placeholder".to_string()),
+                        "Expect property name after '.'",
+                    )?
+                    .unwrap();
+                expr = Expr::get(expr, name);
             } else {
                 break;
             }

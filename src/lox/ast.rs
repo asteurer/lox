@@ -34,6 +34,15 @@ pub enum Expr {
         paren: Token,
         args: Vec<Expr>,
     },
+    Get {
+        object: Box<Expr>,
+        name: Token,
+    },
+    Set {
+        value: Box<Expr>,
+        object: Box<Expr>,
+        name: Token,
+    },
 }
 
 impl Expr {
@@ -85,6 +94,21 @@ impl Expr {
             left: Box::new(left),
             operator,
             right: Box::new(right),
+        }
+    }
+
+    pub fn get(object: Expr, name: Token) -> Expr {
+        Expr::Get {
+            object: Box::new(object),
+            name,
+        }
+    }
+
+    pub fn set(value: Expr, object: Expr, name: Token) -> Expr {
+        Expr::Set {
+            value: Box::new(value),
+            object: Box::new(object),
+            name,
         }
     }
 
@@ -149,6 +173,16 @@ impl Expr {
                         .join(", ")
                 )
             }
+            Expr::Get { object, name } => {
+                format!("TODO: Get Expressions")
+            }
+            Expr::Set {
+                value,
+                object,
+                name,
+            } => {
+                format!("TODO: Set Expressions")
+            }
         };
 
         format!("({expr_string})")
@@ -181,6 +215,10 @@ pub enum Stmt {
         name: Token,
         params: Vec<Token>,
         body: Box<Stmt>,
+    },
+    Class {
+        name: Token,
+        methods: Vec<Stmt>,
     },
 }
 
@@ -262,6 +300,9 @@ else {}"#,
                 }
 
                 format!("return")
+            }
+            Stmt::Class { name, methods } => {
+                format!("TODO: Class")
             }
         };
 
